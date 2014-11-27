@@ -1,0 +1,199 @@
+bdos	equ 0005h
+conin	equ 1
+conout	equ 2
+conio	equ 6
+print	equ 9
+fopen	equ 15
+drvset	equ 14
+fclose	equ 16
+fread	equ 20
+fdmaoff	equ 26
+
+common	equ 0c000h
+roller	equ 0b600h
+screen	equ 05930h
+
+	org 100h
+start:
+	ld de, str
+	ld c, print
+	call bdos
+	
+	call screen_mem
+
+; verify roller ram is at 0b600h - if it isn't, the screen will get corrupted
+	ld a, 05bh
+	out (0f5h), a
+
+	ld hl, (roller)
+	call tpa_mem
+	ld a, 0
+	out (0f6h), a
+	call print_num16
+
+	di	
+	call screen_mem
+	call setup_roller_ram
+	ld hl,(roller)
+	add hl,hl
+	ld bc, 23039
+	ld (hl), 0ffh
+	ld d, h
+	ld e, l
+	inc de
+	ldir
+	jp done
+loop:
+	ld (hl), 0ffh
+	inc hl
+	dec bc
+	ld a,b
+	or c
+	jp nz, loop
+done:
+	ei
+	call tpa_mem
+	
+	ld de,fcb
+	ld c,fopen
+	call bdos
+	cp 0ffh
+	jp z,error
+	
+	ld de,buffer
+	ld c,fdmaoff
+	call bdos
+
+	ld a,180
+	push af
+	ld de,screen
+	push de
+img_loop:
+	ld de,fcb
+	ld c,fread
+	call bdos
+
+	di
+	call screen_mem
+	pop de
+	ld hl,buffer
+	ld bc,128
+	ldir
+	call tpa_mem
+	ei
+	
+	pop af
+	dec a
+	push af
+	push de
+	or a
+	jp nz,img_loop
+	
+	pop af
+	pop de
+	
+	ld c,conin
+	call bdos
+	ret
+error:
+	ld c,print
+	ld de,error_msg
+	call bdos
+	ret
+
+screen_mem:
+	ld a, 081h
+	out (0f1h), a
+	ld a, 082h
+	out (0f2h), a
+	ret
+tpa_mem:
+	ld a, 085h
+	out (0f1h), a
+	ld a, 086h
+	out (0f2h), a
+	ret
+
+; hl = hex num from 0-65535	
+print_num16:
+	push hl
+	ld c, h
+	call print_hex_byte
+	pop hl
+	ld c,l
+	call print_hex_byte
+	ret
+
+; c = hex num from 0-255	
+print_hex_byte:
+	push bc
+	srl c
+	srl c
+	srl c
+	srl c
+	call print_hex_digit
+	pop bc
+	ld a,c
+	and 0fh
+	ld c,a
+	call print_hex_digit
+	ret
+
+	
+; c = hex digit from 0-15
+print_hex_digit:
+	ld b,0
+	ld hl,hex
+	add hl,bc
+	ld e,(hl)
+	ld c,conout
+	call bdos
+	ret
+	
+setup_roller_ram:
+	ld hl, roller
+	ld de, screen
+	ld bc, 720
+loop1_setup_roller_ram:
+	ld a,0
+loop2_setup_roller_ram:
+	push de
+	push af
+	srl d
+	rr e
+	add a,e
+	ld e,a
+	pop af
+	ld (hl), e
+	inc hl
+	ld (hl), d
+	pop de
+	inc hl
+	inc a
+	cp 8
+	jp nz,loop2_setup_roller_ram
+	
+	ex de,hl
+	add hl,bc
+	ex de,hl
+
+	ld a,d
+	cp 0b3h
+	jp c,loop1_setup_roller_ram
+	ld a,e
+	cp 02fh
+	jp c,loop2_setup_roller_ram
+	ret
+
+hex:	db '0123456789ABCDEF'	
+str: 	db 'Hello',13,10,'$'
+error_msg:	db 'Error!',13,10,'$'
+fcb:	db 1 ; drive A
+	db 'BUBBLES PIG'
+	db 0, 0, 0, 0
+	db 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+	db 0, 0, 0, 0
+buffer: ds 128
+	
+
+	end start
